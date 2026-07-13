@@ -14,9 +14,9 @@ final class OverlayPanelController<Content: View> {
     private let size: NSSize
     private let minimumSize: NSSize
     private let nonActivating: Bool
-    private let level: NSWindow.Level
+    private var level: NSWindow.Level
     private let chrome: Chrome
-    private let joinsAllSpaces: Bool
+    private var joinsAllSpaces: Bool
     private let movableByWindowBackground: Bool
     private let hasShadow: Bool
     private let hidesOnDeactivate: Bool
@@ -102,6 +102,24 @@ final class OverlayPanelController<Content: View> {
             panel.styleMask.insert(.resizable)
         } else {
             panel.styleMask.remove(.resizable)
+        }
+    }
+
+    func setWindowPlacement(level: NSWindow.Level, joinsAllSpaces: Bool) {
+        self.level = level
+        self.joinsAllSpaces = joinsAllSpaces
+        guard let panel else { return }
+
+        panel.level = level
+        panel.isFloatingPanel = level.rawValue > NSWindow.Level.normal.rawValue
+        panel.collectionBehavior = collectionBehavior()
+
+        if panel.isVisible {
+            if nonActivating {
+                panel.orderFrontRegardless()
+            } else {
+                panel.orderFront(nil)
+            }
         }
     }
 
@@ -223,12 +241,16 @@ final class OverlayPanelController<Content: View> {
     }
 
     private func collectionBehavior() -> NSWindow.CollectionBehavior {
-        var behavior: NSWindow.CollectionBehavior = [.stationary, .ignoresCycle]
+        var behavior: NSWindow.CollectionBehavior = []
         if joinsAllSpaces {
             behavior.insert(.canJoinAllSpaces)
+            behavior.insert(.stationary)
+            behavior.insert(.ignoresCycle)
         }
         if level.rawValue > NSWindow.Level.normal.rawValue {
             behavior.insert(.fullScreenAuxiliary)
+            behavior.insert(.stationary)
+            behavior.insert(.ignoresCycle)
         }
         return behavior
     }

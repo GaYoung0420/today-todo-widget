@@ -18,6 +18,7 @@ struct ContentView: View {
     @State private var draggedTodoID: TodoItem.ID?
     @State private var dropTargetTodoID: TodoItem.ID?
     @State private var dropPlacement: TodoDropPlacement?
+    @State private var viewMode: TodoWidgetViewMode = .list
 
     var body: some View {
         HStack(spacing: 0) {
@@ -35,7 +36,14 @@ struct ContentView: View {
     private var todoWidget: some View {
         VStack(spacing: 0) {
             header
-            todoList
+            DateNavigator(store: store, compact: true)
+            NotionSyncStrip(store: store, compact: true)
+            TodoWidgetViewModePicker(selection: $viewMode)
+            if viewMode == .list {
+                todoList
+            } else {
+                timeTracker
+            }
             footer
         }
         .frame(
@@ -53,14 +61,14 @@ struct ContentView: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(NotionDesign.Colors.primary)
 
-            Text("오늘 할 일")
+            Text("할 일")
                 .font(NotionDesign.Fonts.pretendard(size: 13, weight: .semibold))
                 .foregroundStyle(NotionDesign.Colors.charcoal)
                 .lineLimit(1)
 
             Spacer(minLength: 8)
 
-            Text("\(store.todos.filter(\.isDone).count)/\(store.todos.count)")
+            Text("\(store.completedTodosForSelectedDateCount)/\(store.todosForSelectedDate.count)")
                 .font(NotionDesign.Fonts.pretendard(size: 11, weight: .medium))
                 .foregroundStyle(NotionDesign.Colors.stone)
                 .monospacedDigit()
@@ -79,6 +87,7 @@ struct ContentView: View {
 
             Button {
                 withAnimation(.easeInOut(duration: 0.16)) {
+                    viewMode = .list
                     isAddingTodo = true
                 }
             } label: {
@@ -117,12 +126,13 @@ struct ContentView: View {
     private var todoList: some View {
         AlwaysVisibleVerticalScrollView {
             LazyVStack(spacing: 0) {
-                ForEach(store.todos) { todo in
+                ForEach(store.todosForSelectedDate) { todo in
                     TodoRow(
                         todo: todo,
                         isHovered: hoveredTodoID == todo.id,
                         isSelected: store.selectedTodoID == todo.id,
                         isActive: session.activeTodo?.id == todo.id,
+                        activeRemainingSeconds: session.activeTodo?.id == todo.id ? session.remainingSeconds : nil,
                         isEditing: editingTodoID == todo.id,
                         editingTitle: $editingTodoTitle,
                         beginEditing: { beginEditing(todo) },
@@ -159,6 +169,10 @@ struct ContentView: View {
                     }
                 }
 
+                if store.todosForSelectedDate.isEmpty && !isAddingTodo {
+                    EmptyDateTodoHint()
+                }
+
                 Color.clear
                     .frame(height: 14)
                     .overlay(alignment: .bottom) {
@@ -190,6 +204,24 @@ struct ContentView: View {
             }
             .padding(.vertical, 4)
         }
+        .frame(minHeight: 152, maxHeight: .infinity)
+        .clipped()
+    }
+
+    private var timeTracker: some View {
+        TimeTrackerView(
+            todos: store.todosForSelectedDate,
+            selectedDate: store.selectedDate,
+            activeTodoID: session.activeTodo?.id,
+            selectedTodoID: store.selectedTodoID,
+            select: { todo in
+                store.selectedTodoID = todo.id
+            },
+            toggleDone: { todo in
+                store.toggleDone(todo)
+            },
+            memo: showMemo
+        )
         .frame(minHeight: 152, maxHeight: .infinity)
         .clipped()
     }
@@ -236,9 +268,7 @@ struct ContentView: View {
     }
 
     private func toggleDone(_ todo: TodoItem) {
-        var updated = todo
-        updated.isDone.toggle()
-        store.updateTodo(updated)
+        store.toggleDone(todo)
     }
 
     private func beginEditing(_ todo: TodoItem) {
@@ -300,23 +330,24 @@ struct ContentView: View {
                 }
             }
 
-            if !store.isTodoWidgetPositionLocked {
-                WindowDragArea { origin in
+            WindowDragArea(
+                isLocked: store.isTodoWidgetPositionLocked,
+                onMoved: { origin in
                     store.setTodoWidgetPosition(x: origin.x, y: origin.y)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                VStack {
-                    Spacer()
-                    WindowResizeArea()
-                        .frame(width: TodoWidgetLayout.handleWidth, height: 34)
-                }
+            VStack {
+                Spacer()
+                WindowResizeArea()
+                    .frame(width: TodoWidgetLayout.handleWidth, height: 34)
             }
         }
         .frame(width: TodoWidgetLayout.handleWidth)
         .frame(minHeight: TodoWidgetLayout.contentHeight, maxHeight: .infinity)
         .contentShape(Rectangle())
-        .help(store.isTodoWidgetPositionLocked ? "위치와 크기가 잠겨 있습니다" : "드래그해서 이동하거나 가장자리에서 크기 조절")
+        .help(store.isTodoWidgetPositionLocked ? "위치는 잠겨 있고 핸들에서 크기 조절 가능" : "드래그해서 이동하거나 핸들에서 크기 조절")
     }
 }
 
@@ -336,11 +367,19 @@ struct MenuTodoPanelView: View {
     @State private var draggedTodoID: TodoItem.ID?
     @State private var dropTargetTodoID: TodoItem.ID?
     @State private var dropPlacement: TodoDropPlacement?
+    @State private var viewMode: TodoWidgetViewMode = .list
 
     var body: some View {
         VStack(spacing: 0) {
             header
-            todoList
+            DateNavigator(store: store, compact: false)
+            NotionSyncStrip(store: store, compact: false)
+            TodoWidgetViewModePicker(selection: $viewMode)
+            if viewMode == .list {
+                todoList
+            } else {
+                timeTracker
+            }
             footer
         }
         .frame(
@@ -364,20 +403,21 @@ struct MenuTodoPanelView: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(NotionDesign.Colors.primary)
 
-            Text("오늘 할 일")
+            Text("할 일")
                 .font(NotionDesign.Fonts.pretendard(size: 15, weight: .semibold))
                 .foregroundStyle(NotionDesign.Colors.charcoal)
                 .lineLimit(1)
 
             Spacer(minLength: 8)
 
-            Text("\(store.todos.filter(\.isDone).count)/\(store.todos.count)")
+            Text("\(store.completedTodosForSelectedDateCount)/\(store.todosForSelectedDate.count)")
                 .font(NotionDesign.Fonts.pretendard(size: 12, weight: .medium))
                 .foregroundStyle(NotionDesign.Colors.stone)
                 .monospacedDigit()
 
             Button {
                 withAnimation(.easeInOut(duration: 0.16)) {
+                    viewMode = .list
                     isAddingTodo = true
                 }
             } label: {
@@ -414,12 +454,13 @@ struct MenuTodoPanelView: View {
     private var todoList: some View {
         AlwaysVisibleVerticalScrollView {
             LazyVStack(spacing: 0) {
-                ForEach(store.todos) { todo in
+                ForEach(store.todosForSelectedDate) { todo in
                     TodoRow(
                         todo: todo,
                         isHovered: hoveredTodoID == todo.id,
                         isSelected: store.selectedTodoID == todo.id,
                         isActive: session.activeTodo?.id == todo.id,
+                        activeRemainingSeconds: session.activeTodo?.id == todo.id ? session.remainingSeconds : nil,
                         isEditing: editingTodoID == todo.id,
                         editingTitle: $editingTodoTitle,
                         beginEditing: { beginEditing(todo) },
@@ -454,6 +495,10 @@ struct MenuTodoPanelView: View {
                     }
                 }
 
+                if store.todosForSelectedDate.isEmpty && !isAddingTodo {
+                    EmptyDateTodoHint()
+                }
+
                 Color.clear
                     .frame(height: 14)
                     .overlay(alignment: .bottom) {
@@ -485,6 +530,24 @@ struct MenuTodoPanelView: View {
             }
             .padding(.vertical, 8)
         }
+        .frame(minHeight: 300, maxHeight: .infinity)
+        .clipped()
+    }
+
+    private var timeTracker: some View {
+        TimeTrackerView(
+            todos: store.todosForSelectedDate,
+            selectedDate: store.selectedDate,
+            activeTodoID: session.activeTodo?.id,
+            selectedTodoID: store.selectedTodoID,
+            select: { todo in
+                store.selectedTodoID = todo.id
+            },
+            toggleDone: { todo in
+                store.toggleDone(todo)
+            },
+            memo: showMemo
+        )
         .frame(minHeight: 300, maxHeight: .infinity)
         .clipped()
     }
@@ -531,9 +594,7 @@ struct MenuTodoPanelView: View {
     }
 
     private func toggleDone(_ todo: TodoItem) {
-        var updated = todo
-        updated.isDone.toggle()
-        store.updateTodo(updated)
+        store.toggleDone(todo)
     }
 
     private func beginEditing(_ todo: TodoItem) {
@@ -580,9 +641,12 @@ struct MenuTodoPanelView: View {
 
 enum TodoWidgetLayout {
     static let contentWidth: CGFloat = 340
-    static let contentHeight: CGFloat = 240
+    static let contentHeight: CGFloat = 338
     static let rowHeight: CGFloat = 38
+    static let viewModeHeight: CGFloat = 30
     static let handleWidth: CGFloat = 18
+    static let resizeEdgeThickness: CGFloat = 6
+    static let resizeCornerSize: CGFloat = 24
     static let shadowPadding = NotionDesign.Panel.shadowPadding
     static let windowWidth = contentWidth + handleWidth + shadowPadding * 2
     static let windowHeight = contentHeight + shadowPadding * 2
@@ -601,11 +665,690 @@ enum MenuTodoPanelLayout {
     static let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
 }
 
+private enum TodoWidgetViewMode: String, CaseIterable {
+    case list
+    case timeTracker
+
+    var iconName: String {
+        switch self {
+        case .list:
+            return "list.bullet"
+        case .timeTracker:
+            return "calendar.day.timeline.left"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .list:
+            return "리스트"
+        case .timeTracker:
+            return "타임"
+        }
+    }
+}
+
+private struct TodoWidgetViewModePicker: View {
+    @Binding var selection: TodoWidgetViewMode
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(TodoWidgetViewMode.allCases, id: \.self) { mode in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.16)) {
+                        selection = mode
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: mode.iconName)
+                            .font(.system(size: 10, weight: .semibold))
+                        Text(mode.title)
+                            .font(NotionDesign.Fonts.pretendard(size: 11, weight: .semibold))
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(WidgetModeButtonStyle(isSelected: selection == mode))
+                .help(mode == .list ? "리스트 보기" : "타임트래커 보기")
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(height: TodoWidgetLayout.viewModeHeight)
+        .background(NotionDesign.Colors.canvas.opacity(0.62))
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(NotionDesign.Colors.hairlineSoft)
+                .frame(height: 1)
+        }
+    }
+}
+
+private struct WidgetModeButtonStyle: ButtonStyle {
+    let isSelected: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(isSelected ? NotionDesign.Colors.primary : NotionDesign.Colors.steel)
+            .frame(height: 22)
+            .background(
+                isSelected ? NotionDesign.Colors.primaryLight : NotionDesign.Colors.surfaceSoft,
+                in: RoundedRectangle(cornerRadius: NotionDesign.Radius.small)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: NotionDesign.Radius.small)
+                    .stroke(isSelected ? NotionDesign.Colors.primary.opacity(0.18) : NotionDesign.Colors.hairlineSoft, lineWidth: 1)
+            }
+            .opacity(configuration.isPressed ? 0.76 : 1)
+    }
+}
+
+private struct DateNavigator: View {
+    @Bindable var store: TodoStore
+    let compact: Bool
+
+    var body: some View {
+        HStack(spacing: compact ? 6 : 8) {
+            Button {
+                store.moveSelectedDate(byDays: -1)
+            } label: {
+                Image(systemName: "chevron.left")
+            }
+            .buttonStyle(DateNavIconButtonStyle())
+            .help("이전 날짜")
+
+            Button {
+                store.selectToday()
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "calendar")
+                        .font(.system(size: 10, weight: .semibold))
+                    Text(Formatters.todoDateTitle(store.selectedDate))
+                        .font(NotionDesign.Fonts.pretendard(size: compact ? 12 : 13, weight: .semibold))
+                        .monospacedDigit()
+                }
+                .lineLimit(1)
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(DateNavTitleButtonStyle(isToday: Calendar.current.isDateInToday(store.selectedDate)))
+            .help("\(Formatters.todoDateAccessibility(store.selectedDate)), 오늘로 이동")
+
+            Button {
+                store.moveSelectedDate(byDays: 1)
+            } label: {
+                Image(systemName: "chevron.right")
+            }
+            .buttonStyle(DateNavIconButtonStyle())
+            .help("다음 날짜")
+        }
+        .padding(.horizontal, compact ? 10 : 14)
+        .frame(height: compact ? 34 : 38)
+        .background(NotionDesign.Colors.surfaceSoft)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(NotionDesign.Colors.hairlineSoft)
+                .frame(height: 1)
+        }
+    }
+}
+
+private struct NotionSyncStrip: View {
+    @Bindable var store: TodoStore
+    let compact: Bool
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Circle()
+                .fill(statusColor)
+                .frame(width: 6, height: 6)
+
+            Text(store.notionWidgetSyncText)
+                .font(NotionDesign.Fonts.pretendard(size: compact ? 10 : 11, weight: .medium))
+                .foregroundStyle(NotionDesign.Colors.steel)
+                .lineLimit(1)
+
+            if store.notionAutoSyncEnabled, store.notionEnabled {
+                Text("\(store.notionAutoSyncIntervalSeconds)초")
+                    .font(NotionDesign.Fonts.pretendard(size: 10, weight: .semibold))
+                    .foregroundStyle(NotionDesign.Colors.stone)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+
+            Button {
+                store.refreshNotionTodosNow()
+            } label: {
+                if store.isNotionSyncing {
+                    ProgressView()
+                        .controlSize(.small)
+                        .scaleEffect(0.62)
+                } else {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+            }
+            .buttonStyle(SyncRefreshButtonStyle())
+            .disabled(!store.canManuallySyncNotion || store.isNotionSyncing)
+            .help(syncHelpText)
+        }
+        .padding(.horizontal, compact ? 12 : 16)
+        .frame(height: compact ? 28 : 30)
+        .background(NotionDesign.Colors.canvas.opacity(0.58))
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(NotionDesign.Colors.hairlineSoft)
+                .frame(height: 1)
+        }
+    }
+
+    private var statusColor: Color {
+        if store.isNotionSyncing {
+            return NotionDesign.Colors.primary
+        }
+        if !store.notionEnabled {
+            return NotionDesign.Colors.muted
+        }
+        if store.notionWidgetSyncText.contains("필요") ||
+            store.notionWidgetSyncText.contains("실패") ||
+            store.notionSyncMessage.contains("오류") ||
+            store.notionSyncMessage.contains("unauthorized") ||
+            store.notionSyncMessage.contains("invalid") {
+            return NotionDesign.Colors.error
+        }
+        return NotionDesign.Colors.success
+    }
+
+    private var syncHelpText: String {
+        if !store.notionEnabled {
+            return "노션 연동이 꺼져 있습니다"
+        }
+        if store.notionToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+            store.notionDatabaseID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "토큰과 DB URL/ID를 입력해주세요"
+        }
+        return "노션에서 지금 업데이트"
+    }
+}
+
+private struct SyncRefreshButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(NotionDesign.Colors.steel)
+            .frame(width: 22, height: 20)
+            .background(NotionDesign.Colors.surface, in: RoundedRectangle(cornerRadius: NotionDesign.Radius.small))
+            .overlay {
+                RoundedRectangle(cornerRadius: NotionDesign.Radius.small)
+                    .stroke(NotionDesign.Colors.hairline, lineWidth: 1)
+            }
+            .opacity(configuration.isPressed ? 0.72 : 1)
+    }
+}
+
+private struct EmptyDateTodoHint: View {
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "calendar.badge.plus")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(NotionDesign.Colors.stone)
+
+            Text("이 날짜에 할 일이 없습니다")
+                .font(NotionDesign.Fonts.pretendard(size: 12, weight: .regular))
+                .foregroundStyle(NotionDesign.Colors.steel)
+                .lineLimit(1)
+
+            Spacer()
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 42)
+    }
+}
+
+private struct TimeTrackerView: View {
+    let todos: [TodoItem]
+    let selectedDate: Date
+    let activeTodoID: TodoItem.ID?
+    let selectedTodoID: TodoItem.ID?
+    let select: (TodoItem) -> Void
+    let toggleDone: (TodoItem) -> Void
+    let memo: (TodoItem) -> Void
+
+    private var scheduledTodos: [TodoItem] {
+        todos
+            .filter { $0.scheduledStartAt != nil }
+            .sorted {
+                ($0.scheduledStartAt ?? $0.todoDate) < ($1.scheduledStartAt ?? $1.todoDate)
+            }
+    }
+
+    var body: some View {
+        AlwaysVisibleVerticalScrollView(
+            scrollToY: initialScrollY,
+            scrollRequestID: scrollRequestID
+        ) {
+            TimeTrackerDayGrid(
+                todos: scheduledTodos,
+                selectedDate: selectedDate,
+                activeTodoID: activeTodoID,
+                selectedTodoID: selectedTodoID,
+                select: select,
+                toggleDone: toggleDone,
+                memo: memo
+            )
+        }
+        .background(NotionDesign.Colors.surfaceSoft.opacity(0.46))
+    }
+
+    private var initialScrollY: CGFloat? {
+        guard Calendar.current.isDateInToday(selectedDate) else { return nil }
+        return max(currentTimeY(Date()) - TimeTrackerLayout.initialCurrentTimeOffset, 0)
+    }
+
+    private var scrollRequestID: String {
+        let startOfDay = Calendar.current.startOfDay(for: selectedDate).timeIntervalSince1970
+        return "time-tracker-\(Int(startOfDay))-\(Calendar.current.isDateInToday(selectedDate))"
+    }
+
+    private func currentTimeY(_ date: Date) -> CGFloat {
+        let components = Calendar.current.dateComponents([.hour, .minute], from: date)
+        let minutes = min(max((components.hour ?? 0) * 60 + (components.minute ?? 0), 0), 24 * 60)
+        return TimeTrackerLayout.topPadding + CGFloat(minutes) / 60 * TimeTrackerLayout.hourHeight
+    }
+}
+
+private struct TimeTrackerDayGrid: View {
+    let todos: [TodoItem]
+    let selectedDate: Date
+    let activeTodoID: TodoItem.ID?
+    let selectedTodoID: TodoItem.ID?
+    let select: (TodoItem) -> Void
+    let toggleDone: (TodoItem) -> Void
+    let memo: (TodoItem) -> Void
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .topLeading) {
+                ForEach(0...24, id: \.self) { hour in
+                    TimeTrackerHourLine(hour: hour)
+                        .frame(width: proxy.size.width)
+                        .position(
+                            x: proxy.size.width / 2,
+                            y: TimeTrackerLayout.topPadding + CGFloat(hour) * TimeTrackerLayout.hourHeight
+                        )
+                }
+
+                if Calendar.current.isDateInToday(selectedDate) {
+                    TimelineView(.periodic(from: Date(), by: 60)) { context in
+                        CurrentTimeLine()
+                            .frame(width: proxy.size.width - TimeTrackerLayout.labelWidth - 10)
+                            .position(
+                                x: TimeTrackerLayout.labelWidth + (proxy.size.width - TimeTrackerLayout.labelWidth - 10) / 2,
+                                y: currentTimeY(context.date)
+                            )
+                            .zIndex(10)
+                    }
+                }
+
+                ForEach(eventPlacements(for: todos)) { placement in
+                    TimeTrackerEventBlock(
+                        todo: placement.todo,
+                        isActive: activeTodoID == placement.todo.id,
+                        isSelected: selectedTodoID == placement.todo.id,
+                        isCompact: placement.isCompact || placement.columnCount > 1,
+                        toggleDone: { toggleDone(placement.todo) }
+                    )
+                    .frame(
+                        width: eventWidth(containerWidth: proxy.size.width, columnCount: placement.columnCount),
+                        height: placement.visualHeight
+                    )
+                    .position(
+                        x: eventX(containerWidth: proxy.size.width, column: placement.column, columnCount: placement.columnCount),
+                        y: TimeTrackerLayout.topPadding + placement.visualTop + placement.visualHeight / 2
+                    )
+                    .onTapGesture {
+                        select(placement.todo)
+                    }
+                    .onTapGesture(count: 2) {
+                        memo(placement.todo)
+                    }
+                }
+
+                if todos.isEmpty {
+                    HStack(spacing: 7) {
+                        Image(systemName: "clock.badge.questionmark")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(NotionDesign.Colors.stone)
+                        Text("시간이 있는 노션 할 일이 없습니다")
+                            .font(NotionDesign.Fonts.pretendard(size: 12, weight: .regular))
+                            .foregroundStyle(NotionDesign.Colors.steel)
+                            .lineLimit(1)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 14)
+                    .frame(height: 42)
+                    .position(x: proxy.size.width / 2, y: TimeTrackerLayout.topPadding + 25)
+                }
+            }
+        }
+        .frame(height: TimeTrackerLayout.totalHeight)
+    }
+
+    private func eventY(for todo: TodoItem) -> CGFloat {
+        CGFloat(startMinute(for: todo)) / 60 * TimeTrackerLayout.hourHeight
+    }
+
+    private func currentTimeY(_ date: Date) -> CGFloat {
+        let components = Calendar.current.dateComponents([.hour, .minute], from: date)
+        let minutes = min(max((components.hour ?? 0) * 60 + (components.minute ?? 0), 0), 24 * 60)
+        return TimeTrackerLayout.topPadding + CGFloat(minutes) / 60 * TimeTrackerLayout.hourHeight
+    }
+
+    private func eventHeight(for todo: TodoItem) -> CGFloat {
+        let durationMinutes = durationMinutes(for: todo)
+        guard durationMinutes > 0 else { return TimeTrackerLayout.markerHeight }
+        let naturalHeight = CGFloat(durationMinutes) / 60 * TimeTrackerLayout.hourHeight
+        if durationMinutes <= TimeTrackerLayout.compactDurationMinutes {
+            return max(naturalHeight, TimeTrackerLayout.minimumCompactEventHeight)
+        }
+        return max(naturalHeight, TimeTrackerLayout.minimumEventHeight)
+    }
+
+    private func startMinute(for todo: TodoItem) -> Int {
+        minuteOfDay(todo.scheduledStartAt ?? todo.todoDate)
+    }
+
+    private func endMinute(for todo: TodoItem) -> Int {
+        guard let end = todo.scheduledEndAt else { return startMinute(for: todo) }
+        let endMinute = minuteOfDay(end)
+        if endMinute == 0, !Calendar.current.isDate(end, inSameDayAs: todo.scheduledStartAt ?? todo.todoDate) {
+            return 24 * 60
+        }
+        return max(endMinute, startMinute(for: todo))
+    }
+
+    private func minuteOfDay(_ date: Date) -> Int {
+        let components = Calendar.current.dateComponents([.hour, .minute], from: date)
+        return min(max((components.hour ?? 0) * 60 + (components.minute ?? 0), 0), 24 * 60)
+    }
+
+    private func durationMinutes(for todo: TodoItem) -> Int {
+        max(endMinute(for: todo) - startMinute(for: todo), 0)
+    }
+
+    private func eventPlacements(for todos: [TodoItem]) -> [TimeTrackerEventPlacement] {
+        let placements = todos.map { todo in
+            TimeTrackerEventPlacement(
+                todo: todo,
+                actualStartMinute: startMinute(for: todo),
+                actualEndMinute: endMinute(for: todo),
+                visualTop: eventY(for: todo),
+                visualHeight: eventHeight(for: todo),
+                isCompact: durationMinutes(for: todo) <= TimeTrackerLayout.compactDurationMinutes
+            )
+        }
+        .sorted {
+            if $0.actualStartMinute == $1.actualStartMinute {
+                return $0.actualEndMinute > $1.actualEndMinute
+            }
+            return $0.actualStartMinute < $1.actualStartMinute
+        }
+
+        var result: [TimeTrackerEventPlacement] = []
+        var group: [TimeTrackerEventPlacement] = []
+        var groupEndMinute = 0
+
+        for placement in placements {
+            if group.isEmpty {
+                group = [placement]
+                groupEndMinute = placement.actualEndMinute
+            } else if placement.actualStartMinute < groupEndMinute {
+                group.append(placement)
+                groupEndMinute = max(groupEndMinute, placement.actualEndMinute)
+            } else {
+                result.append(contentsOf: columnizedPlacements(group))
+                group = [placement]
+                groupEndMinute = placement.actualEndMinute
+            }
+        }
+
+        if !group.isEmpty {
+            result.append(contentsOf: columnizedPlacements(group))
+        }
+
+        return result
+    }
+
+    private func columnizedPlacements(_ group: [TimeTrackerEventPlacement]) -> [TimeTrackerEventPlacement] {
+        var columnEndMinutes: [Int] = []
+        var placed: [TimeTrackerEventPlacement] = []
+
+        for placement in group {
+            let reusableColumn = columnEndMinutes.firstIndex {
+                placement.actualStartMinute >= $0
+            }
+            let column = reusableColumn ?? columnEndMinutes.count
+
+            if reusableColumn == nil {
+                columnEndMinutes.append(placement.actualEndMinute)
+            } else {
+                columnEndMinutes[column] = placement.actualEndMinute
+            }
+
+            var updated = placement
+            updated.column = column
+            placed.append(updated)
+        }
+
+        let columnCount = max(columnEndMinutes.count, 1)
+        return placed.map { placement in
+            var updated = placement
+            updated.columnCount = columnCount
+            return updated
+        }
+    }
+
+    private func eventWidth(containerWidth: CGFloat, columnCount: Int) -> CGFloat {
+        let availableWidth = max(containerWidth - TimeTrackerLayout.labelWidth - 18, 120)
+        let totalGap = CGFloat(max(columnCount - 1, 0)) * TimeTrackerLayout.eventGap
+        return max((availableWidth - totalGap) / CGFloat(max(columnCount, 1)), 58)
+    }
+
+    private func eventX(containerWidth: CGFloat, column: Int, columnCount: Int) -> CGFloat {
+        let width = eventWidth(containerWidth: containerWidth, columnCount: columnCount)
+        return TimeTrackerLayout.labelWidth + 8 + width / 2 + CGFloat(column) * (width + TimeTrackerLayout.eventGap)
+    }
+}
+
+private struct TimeTrackerEventPlacement: Identifiable {
+    let todo: TodoItem
+    let actualStartMinute: Int
+    let actualEndMinute: Int
+    let visualTop: CGFloat
+    let visualHeight: CGFloat
+    let isCompact: Bool
+    var column = 0
+    var columnCount = 1
+
+    var id: TodoItem.ID { todo.id }
+}
+
+private struct TimeTrackerHourLine: View {
+    let hour: Int
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Text(String(format: "%02d시", hour))
+                .font(NotionDesign.Fonts.pretendard(size: 11, weight: .semibold))
+                .foregroundStyle(NotionDesign.Colors.steel)
+                .monospacedDigit()
+                .frame(width: TimeTrackerLayout.labelWidth - 8, alignment: .trailing)
+                .padding(.trailing, 8)
+
+            Rectangle()
+                .fill(NotionDesign.Colors.hairlineSoft)
+                .frame(height: 1)
+        }
+    }
+}
+
+private struct CurrentTimeLine: View {
+    var body: some View {
+        HStack(spacing: 0) {
+            Circle()
+                .fill(NotionDesign.Colors.error)
+                .frame(width: 6, height: 6)
+
+            Rectangle()
+                .fill(NotionDesign.Colors.error.opacity(0.72))
+                .frame(height: 1.5)
+        }
+        .shadow(color: NotionDesign.Colors.error.opacity(0.16), radius: 3, x: 0, y: 1)
+        .accessibilityLabel("현재 시간")
+    }
+}
+
+private struct TimeTrackerEventBlock: View {
+    let todo: TodoItem
+    let isActive: Bool
+    let isSelected: Bool
+    let isCompact: Bool
+    let toggleDone: () -> Void
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            HStack(alignment: isCompact ? .center : .top, spacing: isCompact ? 4 : 6) {
+                CheckCircle(
+                    checked: todo.isDone,
+                    tint: isActive ? NotionDesign.Colors.primary : NotionDesign.Colors.stone,
+                    size: isCompact ? 10 : 15
+                )
+                .frame(width: isCompact ? 11 : 16, height: isCompact ? 11 : 16)
+                .padding(.top, isCompact ? 0 : 1)
+
+                if isCompact {
+                    HStack(spacing: 3) {
+                        titleText
+
+                        if let scheduledStartAt = todo.scheduledStartAt {
+                            Text(Formatters.clockTime(scheduledStartAt))
+                                .font(NotionDesign.Fonts.pretendard(size: 9, weight: .regular))
+                                .foregroundStyle(NotionDesign.Colors.stone)
+                                .lineLimit(1)
+                                .monospacedDigit()
+                        }
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 2) {
+                        titleText
+
+                        if let scheduledStartAt = todo.scheduledStartAt {
+                            Text(Formatters.todoTimeRange(start: scheduledStartAt, end: todo.scheduledEndAt))
+                                .font(NotionDesign.Fonts.pretendard(size: 11, weight: .regular))
+                                .foregroundStyle(NotionDesign.Colors.stone)
+                                .lineLimit(1)
+                                .monospacedDigit()
+                        }
+                    }
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            ClickCaptureView(action: toggleDone)
+                .frame(width: isCompact ? 32 : 38, height: isCompact ? 22 : 34)
+                .offset(x: isCompact ? 0 : 1, y: isCompact ? -4 : 2)
+                .contentShape(Rectangle())
+                .help(todo.isDone ? "완료 취소" : "완료")
+        }
+        .padding(.horizontal, isCompact ? 6 : 9)
+        .padding(.vertical, isCompact ? 1 : 6)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(eventBackground, in: RoundedRectangle(cornerRadius: NotionDesign.Radius.medium))
+        .overlay {
+            RoundedRectangle(cornerRadius: NotionDesign.Radius.medium)
+                .stroke(eventStroke, lineWidth: isSelected || isActive ? 1 : 0)
+        }
+    }
+
+    private var titleText: some View {
+        Text(todo.title)
+            .font(NotionDesign.Fonts.pretendard(size: isCompact ? 10 : 12, weight: .medium))
+            .foregroundStyle(todo.isDone ? NotionDesign.Colors.stone : NotionDesign.Colors.charcoal)
+            .strikethrough(todo.isDone, color: NotionDesign.Colors.stone)
+            .lineLimit(1)
+    }
+
+    private var eventBackground: Color {
+        if isActive { return NotionDesign.Colors.primaryLight.opacity(0.82) }
+        if isSelected { return NotionDesign.Colors.surface.opacity(0.96) }
+        return Color(hex: 0xF5EFEF).opacity(0.78)
+    }
+
+    private var eventStroke: Color {
+        isActive ? NotionDesign.Colors.primary.opacity(0.24) : NotionDesign.Colors.hairline
+    }
+}
+
+private enum TimeTrackerLayout {
+    static let labelWidth: CGFloat = 58
+    static let hourHeight: CGFloat = 58
+    static let topPadding: CGFloat = 14
+    static let bottomPadding: CGFloat = 18
+    static let markerHeight: CGFloat = 24
+    static let minimumCompactEventHeight: CGFloat = 12
+    static let compactDurationMinutes = 15
+    static let minimumEventHeight: CGFloat = 42
+    static let eventGap: CGFloat = 4
+    static let initialCurrentTimeOffset: CGFloat = 116
+    static let totalHeight: CGFloat = topPadding + hourHeight * 24 + bottomPadding
+}
+
+private struct DateNavIconButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(NotionDesign.Colors.steel)
+            .frame(width: 26, height: 24)
+            .background(NotionDesign.Colors.surface, in: RoundedRectangle(cornerRadius: NotionDesign.Radius.small))
+            .overlay {
+                RoundedRectangle(cornerRadius: NotionDesign.Radius.small)
+                    .stroke(NotionDesign.Colors.hairline, lineWidth: 1)
+            }
+            .opacity(configuration.isPressed ? 0.72 : 1)
+    }
+}
+
+private struct DateNavTitleButtonStyle: ButtonStyle {
+    let isToday: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(isToday ? NotionDesign.Colors.primary : NotionDesign.Colors.charcoal)
+            .frame(height: 24)
+            .padding(.horizontal, 8)
+            .background(
+                isToday ? NotionDesign.Colors.primaryLight : NotionDesign.Colors.surface,
+                in: RoundedRectangle(cornerRadius: NotionDesign.Radius.small)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: NotionDesign.Radius.small)
+                    .stroke(isToday ? NotionDesign.Colors.primary.opacity(0.18) : NotionDesign.Colors.hairline, lineWidth: 1)
+            }
+            .opacity(configuration.isPressed ? 0.78 : 1)
+    }
+}
+
 private struct AlwaysVisibleVerticalScrollView<Content: View>: NSViewRepresentable {
     let content: Content
+    var scrollToY: CGFloat?
+    var scrollRequestID: String
 
-    init(@ViewBuilder content: () -> Content) {
+    init(
+        scrollToY: CGFloat? = nil,
+        scrollRequestID: String = "",
+        @ViewBuilder content: () -> Content
+    ) {
         self.content = content()
+        self.scrollToY = scrollToY
+        self.scrollRequestID = scrollRequestID
     }
 
     func makeCoordinator() -> Coordinator {
@@ -636,6 +1379,12 @@ private struct AlwaysVisibleVerticalScrollView<Content: View>: NSViewRepresentab
             hostingView.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor)
         ])
 
+        context.coordinator.scrollIfNeeded(
+            scrollView,
+            targetY: scrollToY,
+            requestID: scrollRequestID
+        )
+
         return scrollView
     }
 
@@ -646,10 +1395,46 @@ private struct AlwaysVisibleVerticalScrollView<Content: View>: NSViewRepresentab
         scrollView.scrollerStyle = .legacy
         scrollView.verticalScroller?.controlSize = .small
         context.coordinator.hostingView?.rootView = AnyView(content)
+        context.coordinator.scrollIfNeeded(
+            scrollView,
+            targetY: scrollToY,
+            requestID: scrollRequestID
+        )
     }
 
     final class Coordinator {
         var hostingView: NSHostingView<AnyView>?
+        private var lastScrollRequestID: String?
+
+        func scrollIfNeeded(_ scrollView: NSScrollView, targetY: CGFloat?, requestID: String) {
+            guard let targetY else { return }
+            guard lastScrollRequestID != requestID else { return }
+
+            DispatchQueue.main.async {
+                if self.scroll(scrollView, toY: targetY) {
+                    self.lastScrollRequestID = requestID
+                }
+            }
+        }
+
+        private func scroll(_ scrollView: NSScrollView, toY targetY: CGFloat) -> Bool {
+            guard let documentView = scrollView.documentView else { return false }
+
+            scrollView.layoutSubtreeIfNeeded()
+            documentView.layoutSubtreeIfNeeded()
+
+            let documentHeight = max(documentView.bounds.height, documentView.fittingSize.height)
+            let visibleHeight = scrollView.contentView.bounds.height
+            guard documentHeight > 0, visibleHeight > 0 else { return false }
+
+            let maxY = max(documentHeight - visibleHeight, 0)
+            let clampedY = min(max(targetY, 0), maxY)
+            let scrollY = documentView.isFlipped ? clampedY : maxY - clampedY
+
+            scrollView.contentView.scroll(to: NSPoint(x: 0, y: scrollY))
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+            return true
+        }
     }
 }
 
@@ -658,6 +1443,7 @@ private struct TodoRow: View {
     let isHovered: Bool
     let isSelected: Bool
     let isActive: Bool
+    let activeRemainingSeconds: Int?
     let isEditing: Bool
     @Binding var editingTitle: String
     let beginEditing: () -> Void
@@ -686,41 +1472,46 @@ private struct TodoRow: View {
 
             ZStack {
                 HStack(spacing: 8) {
-                    VStack(alignment: .leading, spacing: 1) {
-                        HStack(spacing: 6) {
-                            if isEditing {
-                                TextField("", text: $editingTitle)
-                                    .font(NotionDesign.Fonts.pretendard(size: 13, weight: .regular))
-                                    .foregroundStyle(NotionDesign.Colors.charcoal)
-                                    .textFieldStyle(.plain)
-                                    .focused($isTitleFocused)
-                                    .onSubmit(commitEditing)
-                                    .onExitCommand(perform: cancelEditing)
-                                    .onChange(of: isTitleFocused) { _, focused in
-                                        if !focused {
-                                            commitEditing()
-                                        }
+                    HStack(spacing: 6) {
+                        if isEditing {
+                            TextField("", text: $editingTitle)
+                                .font(NotionDesign.Fonts.pretendard(size: 13, weight: .regular))
+                                .foregroundStyle(NotionDesign.Colors.charcoal)
+                                .textFieldStyle(.plain)
+                                .focused($isTitleFocused)
+                                .onSubmit(commitEditing)
+                                .onExitCommand(perform: cancelEditing)
+                                .onChange(of: isTitleFocused) { _, focused in
+                                    if !focused {
+                                        commitEditing()
                                     }
-                                    .layoutPriority(1)
-                            } else {
-                                Text(todo.title)
-                                    .font(NotionDesign.Fonts.pretendard(size: 13, weight: .regular))
-                                    .foregroundStyle(todo.isDone ? NotionDesign.Colors.stone : NotionDesign.Colors.charcoal)
-                                    .strikethrough(todo.isDone, color: NotionDesign.Colors.stone)
-                                    .lineLimit(1)
-                                    .layoutPriority(1)
-                            }
-
-                            PomodoroProgressDots(todo: todo)
-                                .fixedSize()
+                                }
+                                .layoutPriority(1)
+                        } else {
+                            Text(todo.title)
+                                .font(NotionDesign.Fonts.pretendard(size: 13, weight: .regular))
+                                .foregroundStyle(todo.isDone ? NotionDesign.Colors.stone : NotionDesign.Colors.charcoal)
+                                .strikethrough(todo.isDone, color: NotionDesign.Colors.stone)
+                                .lineLimit(1)
+                                .layoutPriority(1)
                         }
 
-                        if isActive {
-                            Text("진행 중")
-                                .font(NotionDesign.Fonts.pretendard(size: 10, weight: .semibold))
-                                .foregroundStyle(NotionDesign.Colors.primary)
+                        PomodoroProgressDots(todo: todo)
+                            .fixedSize()
+
+                        if todo.notionPageID != nil {
+                            Image(systemName: "square.grid.2x2")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(NotionDesign.Colors.steel)
+                                .help("노션에서 가져온 항목")
+                        }
+
+                        if let activeTimerLabel {
+                            ActiveTodoStatusBadge(text: activeTimerLabel)
+                                .fixedSize(horizontal: true, vertical: false)
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
                     Spacer(minLength: 6)
                 }
@@ -785,6 +1576,37 @@ private struct TodoRow: View {
 
     private var tagColor: Color {
         todo.completedPomodoros >= todo.targetPomodoros ? NotionDesign.Colors.success : NotionDesign.Colors.primary
+    }
+
+    private var activeTimerLabel: String? {
+        guard isActive, let activeRemainingSeconds else { return nil }
+        return "진행 중 \(Formatters.timeRemaining(activeRemainingSeconds))"
+    }
+}
+
+private struct ActiveTodoStatusBadge: View {
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(NotionDesign.Colors.primary)
+                .frame(width: 4, height: 4)
+
+            Text(text)
+                .font(NotionDesign.Fonts.pretendard(size: 10, weight: .semibold))
+                .foregroundStyle(NotionDesign.Colors.primary)
+                .monospacedDigit()
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 6)
+        .frame(height: 18)
+        .background(NotionDesign.Colors.primaryLight.opacity(0.84), in: Capsule())
+        .overlay {
+            Capsule()
+                .stroke(NotionDesign.Colors.primary.opacity(0.14), lineWidth: 1)
+        }
+        .accessibilityLabel(text)
     }
 }
 
@@ -945,6 +1767,7 @@ private struct AddTodoInlineRow: View {
 private struct CheckCircle: View {
     let checked: Bool
     var tint: Color = NotionDesign.Colors.primary
+    var size: CGFloat = 15
 
     var body: some View {
         ZStack {
@@ -957,11 +1780,11 @@ private struct CheckCircle: View {
 
             if checked {
                 Image(systemName: "checkmark")
-                    .font(.system(size: 8, weight: .bold))
+                    .font(.system(size: max(size * 0.53, 6), weight: .bold))
                     .foregroundStyle(.white)
             }
         }
-        .frame(width: 15, height: 15)
+        .frame(width: size, height: size)
     }
 }
 
@@ -1158,6 +1981,7 @@ private struct PomodoroProgressDots: View {
 
 struct SettingsPanelView: View {
     @Bindable var store: TodoStore
+    let setTodoWidgetDesktopMode: (Bool) -> Void
     @State private var selectedTab: SettingsTab = .general
 
     var body: some View {
@@ -1172,11 +1996,16 @@ struct SettingsPanelView: View {
                 Group {
                     switch selectedTab {
                     case .general:
-                        GeneralSettings(store: store)
+                        GeneralSettings(
+                            store: store,
+                            setTodoWidgetDesktopMode: setTodoWidgetDesktopMode
+                        )
                     case .timer:
                         TimerSettings(store: store)
                     case .alerts:
                         AlertSettings(store: store)
+                    case .notion:
+                        NotionSettings(store: store)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -1243,8 +2072,8 @@ struct SettingsPanelView: View {
 }
 
 enum SettingsPanelLayout {
-    static let contentWidth: CGFloat = 320
-    static let contentHeight: CGFloat = 342
+    static let contentWidth: CGFloat = 360
+    static let contentHeight: CGFloat = 486
     static let tabHeight: CGFloat = 36
     static let contentHorizontalPadding: CGFloat = 14
     static let contentTopPadding: CGFloat = 14
@@ -1263,6 +2092,7 @@ private enum SettingsTab: CaseIterable {
     case general
     case timer
     case alerts
+    case notion
 
     var title: String {
         switch self {
@@ -1272,12 +2102,15 @@ private enum SettingsTab: CaseIterable {
             "타이머"
         case .alerts:
             "알림"
+        case .notion:
+            "노션"
         }
     }
 }
 
 private struct GeneralSettings: View {
     @Bindable var store: TodoStore
+    let setTodoWidgetDesktopMode: (Bool) -> Void
 
     var body: some View {
         VStack(spacing: SettingsPanelLayout.rowSpacing) {
@@ -1297,6 +2130,20 @@ private struct GeneralSettings: View {
             }
             .buttonStyle(.plain)
             .help("차단할 웹사이트")
+
+            SettingsRowShell {
+                Text("배경 위젯 모드")
+                Spacer()
+                SettingsTrailingSlot {
+                    Toggle("", isOn: Binding(
+                        get: { store.isTodoWidgetDesktopModeEnabled },
+                        set: { setTodoWidgetDesktopMode($0) }
+                    ))
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+                }
+            }
+            .help("끄면 투두 위젯을 일반 창 레벨로 표시")
 
             SettingsRowShell {
                 Text("로그인 시 자동 실행")
@@ -1380,6 +2227,169 @@ private struct AlertSettings: View {
     }
 }
 
+private struct NotionSettings: View {
+    @Bindable var store: TodoStore
+
+    private let syncIntervals = [30, 60, 300]
+
+    var body: some View {
+        VStack(spacing: SettingsPanelLayout.rowSpacing) {
+            SettingsRowShell {
+                Text("노션 연동")
+                Spacer()
+                SettingsTrailingSlot {
+                    Toggle("", isOn: Binding(
+                        get: { store.notionEnabled },
+                        set: { store.setNotionEnabled($0) }
+                    ))
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+                }
+            }
+
+            SettingsRowShell {
+                Text("자동 동기화")
+                Spacer()
+                SettingsTrailingSlot {
+                    Toggle("", isOn: Binding(
+                        get: { store.notionAutoSyncEnabled },
+                        set: { store.setNotionAutoSyncEnabled($0) }
+                    ))
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+                }
+            }
+
+            SettingsRowShell {
+                Text("동기화 간격")
+                Spacer()
+                Picker("", selection: Binding(
+                    get: { store.notionAutoSyncIntervalSeconds },
+                    set: { store.setNotionAutoSyncIntervalSeconds($0) }
+                )) {
+                    ForEach(syncIntervals, id: \.self) { seconds in
+                        Text(intervalLabel(seconds)).tag(seconds)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .frame(width: 104, alignment: .trailing)
+                .disabled(!store.notionAutoSyncEnabled)
+            }
+
+            SettingsInputRow(
+                title: "DB URL 또는 ID",
+                placeholder: "notion.so/...",
+                text: $store.notionDatabaseID,
+                isSecure: false,
+                submit: store.saveNotionSettings
+            )
+
+            SettingsInputRow(
+                title: "Integration Token",
+                placeholder: "노션 integration token",
+                text: $store.notionToken,
+                isSecure: true,
+                submit: store.saveNotionSettings
+            )
+
+            HStack(spacing: 8) {
+                Button {
+                    store.refreshNotionTodosNow()
+                } label: {
+                    HStack(spacing: 6) {
+                        if store.isNotionSyncing {
+                            ProgressView()
+                                .controlSize(.small)
+                                .scaleEffect(0.72)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 11, weight: .semibold))
+                        }
+                        Text(store.isNotionSyncing ? "가져오는 중" : "가져오기")
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(NotionSyncButtonStyle())
+                .disabled(store.isNotionSyncing)
+
+                Button {
+                    store.saveNotionSettings()
+                    store.configureNotionAutoSync()
+                } label: {
+                    Text("저장")
+                        .frame(width: 54)
+                }
+                .buttonStyle(NotionSyncButtonStyle(isSecondary: true))
+            }
+
+            Text(statusText)
+                .font(NotionDesign.Fonts.pretendard(size: 11, weight: .regular))
+                .foregroundStyle(statusColor)
+                .lineLimit(3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 4)
+        }
+        .frame(maxWidth: .infinity, alignment: .top)
+    }
+
+    private var statusText: String {
+        if !store.notionSyncMessage.isEmpty {
+            return store.notionSyncMessage
+        }
+        if let syncedAt = store.notionLastSyncedAt {
+            return "마지막 동기화 \(Formatters.relativeTime(syncedAt))"
+        }
+        return "노션 DB를 앱에 공유한 뒤 토큰과 DB URL을 입력하세요."
+    }
+
+    private var statusColor: Color {
+        store.notionSyncMessage.contains("실패") ? NotionDesign.Colors.error : NotionDesign.Colors.steel
+    }
+
+    private func intervalLabel(_ seconds: Int) -> String {
+        seconds < 60 ? "\(seconds)초" : "\(seconds / 60)분"
+    }
+}
+
+private struct SettingsInputRow: View {
+    let title: String
+    let placeholder: String
+    @Binding var text: String
+    let isSecure: Bool
+    let submit: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(NotionDesign.Fonts.pretendard(size: 12, weight: .medium))
+                .foregroundStyle(NotionDesign.Colors.charcoal)
+
+            Group {
+                if isSecure {
+                    SecureField(placeholder, text: $text)
+                } else {
+                    TextField(placeholder, text: $text)
+                }
+            }
+            .font(NotionDesign.Fonts.pretendard(size: 12, weight: .regular))
+            .textFieldStyle(.plain)
+            .onSubmit(submit)
+            .padding(.horizontal, 8)
+            .frame(height: 28)
+            .background(NotionDesign.Colors.surfaceSoft, in: RoundedRectangle(cornerRadius: NotionDesign.Radius.small))
+            .overlay {
+                RoundedRectangle(cornerRadius: NotionDesign.Radius.small)
+                    .stroke(NotionDesign.Colors.hairline, lineWidth: 1)
+            }
+        }
+        .padding(.horizontal, SettingsPanelLayout.rowHorizontalPadding)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity)
+        .background(NotionDesign.Colors.surface, in: RoundedRectangle(cornerRadius: NotionDesign.Radius.medium))
+    }
+}
+
 private struct SettingsMusicPickerRow: View {
     @Bindable var store: TodoStore
 
@@ -1406,6 +2416,27 @@ private struct SettingsMusicPickerRow: View {
             .labelsHidden()
             .frame(width: 158, alignment: .trailing)
         }
+    }
+}
+
+private struct NotionSyncButtonStyle: ButtonStyle {
+    var isSecondary = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(NotionDesign.Fonts.pretendard(size: 12, weight: .semibold))
+            .foregroundStyle(isSecondary ? NotionDesign.Colors.charcoal : Color.white)
+            .frame(height: 34)
+            .padding(.horizontal, 10)
+            .background(
+                isSecondary ? NotionDesign.Colors.surface : NotionDesign.Colors.charcoal,
+                in: RoundedRectangle(cornerRadius: NotionDesign.Radius.small)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: NotionDesign.Radius.small)
+                    .stroke(NotionDesign.Colors.hairline, lineWidth: isSecondary ? 1 : 0)
+            }
+            .opacity(configuration.isPressed ? 0.78 : 1)
     }
 }
 
@@ -1587,74 +2618,88 @@ private struct BlockedSitesEditor: View {
 }
 
 private struct WindowDragArea: NSViewRepresentable {
+    let isLocked: Bool
     let onMoved: (CGPoint) -> Void
 
     func makeNSView(context: Context) -> DragHandleView {
         let view = DragHandleView()
+        view.isLocked = isLocked
         view.onMoved = onMoved
         return view
     }
 
     func updateNSView(_ nsView: DragHandleView, context: Context) {
+        nsView.isLocked = isLocked
         nsView.onMoved = onMoved
     }
 }
 
 private final class DragHandleView: NSView {
+    var isLocked = false
     var onMoved: ((CGPoint) -> Void)?
-    private var initialMouseLocation = NSPoint.zero
-    private var initialWindowOrigin = NSPoint.zero
 
     override func resetCursorRects() {
         addCursorRect(bounds, cursor: .openHand)
     }
 
-    override func mouseDown(with event: NSEvent) {
-        guard let window else { return }
-        initialMouseLocation = NSEvent.mouseLocation
-        initialWindowOrigin = window.frame.origin
-        NSCursor.closedHand.set()
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
     }
 
-    override func mouseDragged(with event: NSEvent) {
-        guard let window else { return }
-        let currentMouseLocation = NSEvent.mouseLocation
-        let deltaX = currentMouseLocation.x - initialMouseLocation.x
-        let deltaY = currentMouseLocation.y - initialMouseLocation.y
-        window.setFrameOrigin(NSPoint(
-            x: initialWindowOrigin.x + deltaX,
-            y: initialWindowOrigin.y + deltaY
-        ))
+    override func mouseDown(with event: NSEvent) {
+        guard let window, !isLocked else { return }
+        NSCursor.closedHand.set()
+        defer { NSCursor.openHand.set() }
+        window.isMovable = true
+        window.performDrag(with: event)
+        publishCurrentOrigin()
     }
 
     override func mouseUp(with event: NSEvent) {
-        guard let origin = window?.frame.origin else { return }
         NSCursor.openHand.set()
+        publishCurrentOrigin()
+    }
+
+    private func publishCurrentOrigin() {
+        guard let origin = window?.frame.origin else { return }
         onMoved?(CGPoint(x: origin.x, y: origin.y))
     }
 }
 
 private struct WindowResizeArea: NSViewRepresentable {
+    var mode: ResizeHandleMode = .bottomRight
+
     func makeNSView(context: Context) -> ResizeHandleView {
-        ResizeHandleView()
+        let view = ResizeHandleView()
+        view.mode = mode
+        return view
     }
 
-    func updateNSView(_ nsView: ResizeHandleView, context: Context) {}
+    func updateNSView(_ nsView: ResizeHandleView, context: Context) {
+        nsView.mode = mode
+    }
+}
+
+private enum ResizeHandleMode {
+    case right
+    case bottom
+    case bottomRight
 }
 
 private final class ResizeHandleView: NSView {
+    var mode: ResizeHandleMode = .bottomRight
     private var initialMouseLocation = NSPoint.zero
     private var initialWindowFrame = NSRect.zero
 
     override func resetCursorRects() {
-        addCursorRect(bounds, cursor: .resizeLeftRight)
+        addCursorRect(bounds, cursor: cursor)
     }
 
     override func mouseDown(with event: NSEvent) {
         guard let window else { return }
         initialMouseLocation = NSEvent.mouseLocation
         initialWindowFrame = window.frame
-        NSCursor.resizeLeftRight.set()
+        cursor.set()
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -1664,8 +2709,12 @@ private final class ResizeHandleView: NSView {
         let deltaX = mouseLocation.x - initialMouseLocation.x
         let deltaY = mouseLocation.y - initialMouseLocation.y
         let minSize = window.minSize
-        let newWidth = max(minSize.width, initialWindowFrame.width + deltaX)
-        let newHeight = max(minSize.height, initialWindowFrame.height - deltaY)
+        let newWidth = mode.resizesWidth
+            ? max(minSize.width, initialWindowFrame.width + deltaX)
+            : initialWindowFrame.width
+        let newHeight = mode.resizesHeight
+            ? max(minSize.height, initialWindowFrame.height - deltaY)
+            : initialWindowFrame.height
         let newOriginY = initialWindowFrame.maxY - newHeight
 
         window.setFrame(
@@ -1677,6 +2726,29 @@ private final class ResizeHandleView: NSView {
             ),
             display: true
         )
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        NSCursor.arrow.set()
+    }
+
+    private var cursor: NSCursor {
+        switch mode {
+        case .right, .bottomRight:
+            return .resizeLeftRight
+        case .bottom:
+            return .resizeUpDown
+        }
+    }
+}
+
+private extension ResizeHandleMode {
+    var resizesWidth: Bool {
+        self == .right || self == .bottomRight
+    }
+
+    var resizesHeight: Bool {
+        self == .bottom || self == .bottomRight
     }
 }
 

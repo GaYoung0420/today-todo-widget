@@ -11,8 +11,11 @@ DIST_DIR="$ROOT_DIR/dist"
 APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
 APP_CONTENTS="$APP_BUNDLE/Contents"
 APP_MACOS="$APP_CONTENTS/MacOS"
+APP_RESOURCES="$APP_CONTENTS/Resources"
 APP_BINARY="$APP_MACOS/$APP_NAME"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
+APP_ICON_SOURCE="$ROOT_DIR/Sources/FocusTodo/Resources/AppIcon.icns"
+APP_ICON_NAME="AppIcon.icns"
 
 pkill -x "$APP_NAME" >/dev/null 2>&1 || true
 
@@ -21,8 +24,12 @@ BUILD_BINARY="$(swift build --show-bin-path)/$APP_NAME"
 
 rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_MACOS"
+mkdir -p "$APP_RESOURCES"
 cp "$BUILD_BINARY" "$APP_BINARY"
 chmod +x "$APP_BINARY"
+
+cp "$APP_ICON_SOURCE" "$APP_RESOURCES/$APP_ICON_NAME"
+find "$(swift build --show-bin-path)" -maxdepth 1 -name "${APP_NAME}_*.bundle" -exec cp -R {} "$APP_RESOURCES/" \;
 
 cat >"$INFO_PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -35,6 +42,8 @@ cat >"$INFO_PLIST" <<PLIST
   <string>$BUNDLE_ID</string>
   <key>CFBundleName</key>
   <string>$APP_NAME</string>
+  <key>CFBundleIconFile</key>
+  <string>$APP_ICON_NAME</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>LSMinimumSystemVersion</key>

@@ -15,6 +15,12 @@ final class AppCoordinator {
     private var hotKeyManager: HotKeyManager?
     private var statusBarController: StatusBarController?
 
+    private static let desktopTodoWidgetLevel = NSWindow.Level(rawValue: -1)
+
+    private var todoWidgetLevel: NSWindow.Level {
+        store.isTodoWidgetDesktopModeEnabled ? Self.desktopTodoWidgetLevel : .normal
+    }
+
     init() {
         session = PomodoroSession(blocker: blocker)
         session.onFocusCompleted = { [weak self] todo in
@@ -37,11 +43,10 @@ final class AppCoordinator {
             size: NSSize(width: TodoWidgetLayout.windowWidth, height: TodoWidgetLayout.windowHeight),
             minimumSize: NSSize(width: TodoWidgetLayout.windowWidth, height: TodoWidgetLayout.windowHeight),
             nonActivating: false,
-            level: NSWindow.Level(rawValue: -1),
+            level: todoWidgetLevel,
             chrome: .borderless,
             joinsAllSpaces: false,
-            movableByWindowBackground: false,
-            isResizable: !store.isTodoWidgetPositionLocked
+            movableByWindowBackground: false
         ) {
             ContentView(
                 store: self.store,
@@ -84,11 +89,17 @@ final class AppCoordinator {
             title: "환경설정",
             size: NSSize(width: SettingsPanelLayout.windowWidth, height: SettingsPanelLayout.windowHeight),
             nonActivating: false,
-            level: .screenSaver,
+            level: .normal,
             chrome: .borderless,
+            joinsAllSpaces: false,
             onClose: { [weak self] in self?.store.isBlockedSitesPresented = false }
         ) {
-            SettingsPanelView(store: self.store)
+            SettingsPanelView(
+                store: self.store,
+                setTodoWidgetDesktopMode: { [weak self] enabled in
+                    self?.setTodoWidgetDesktopMode(enabled)
+                }
+            )
         }
 
         hotKeyManager = HotKeyManager { [weak self] in
@@ -98,6 +109,14 @@ final class AppCoordinator {
         statusBarController = StatusBarController(coordinator: self)
 
         showTodoPanel()
+        store.configureNotionAutoSync()
+
+        if store.notionEnabled {
+            Task {
+                await store.refreshNotionTodos()
+                statusBarController?.refreshStatusItem()
+            }
+        }
     }
 
     func showTodoPanel() {
@@ -117,11 +136,11 @@ final class AppCoordinator {
             )
         }
         todoPanel?.show(position: origin)
-        todoPanel?.setResizable(!store.isTodoWidgetPositionLocked)
+        store.refreshNotionTodosIfStale(maxAgeSeconds: 30)
     }
 
     func startPomodoro(_ todo: TodoItem) {
-        let currentTodo = store.binding(for: todo)
+        let currentTodo = store.startPomodoro(for: store.binding(for: todo))
         store.selectedTodoID = currentTodo.id
         session.start(todo: currentTodo, blockedSites: store.blockedSites)
         statusBarController?.refreshStatusItem()
@@ -166,7 +185,14 @@ final class AppCoordinator {
 
     func setTodoWidgetLocked(_ locked: Bool) {
         store.setTodoWidgetPositionLocked(locked)
-        todoPanel?.setResizable(!locked)
+    }
+
+    func setTodoWidgetDesktopMode(_ enabled: Bool) {
+        store.setTodoWidgetDesktopModeEnabled(enabled)
+        todoPanel?.setWindowPlacement(
+            level: todoWidgetLevel,
+            joinsAllSpaces: false
+        )
     }
 
     func toggleMemoForSelection() {

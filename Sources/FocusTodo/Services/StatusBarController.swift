@@ -7,6 +7,7 @@ final class StatusBarController: NSObject {
     private weak var coordinator: AppCoordinator?
     private var refreshTimer: Timer?
     private var menuTodoPopover: NSPopover?
+    private static let menuBarIcon = makeMenuBarIcon()
 
     init(coordinator: AppCoordinator) {
         self.coordinator = coordinator
@@ -29,16 +30,32 @@ final class StatusBarController: NSObject {
             return
         }
 
+        button.image = Self.menuBarIcon
+        button.imageScaling = .scaleProportionallyDown
+
         if let todo = coordinator.session.activeTodo {
-            button.image = nil
             button.title = "\(menuBarTodoTitle(todo.title)) \(Formatters.timeRemaining(coordinator.session.remainingSeconds))"
+            button.imagePosition = .imageLeading
         } else {
             button.title = ""
-            button.image = NSImage(systemSymbolName: "timer", accessibilityDescription: "Focus Todo")
             button.imagePosition = .imageOnly
         }
 
         button.toolTip = "Focus Todo"
+    }
+
+    private static func makeMenuBarIcon() -> NSImage {
+        if let url = Bundle.module.url(forResource: "MenuBarIcon", withExtension: "png"),
+           let image = NSImage(contentsOf: url) {
+            image.size = NSSize(width: 18, height: 18)
+            image.isTemplate = true
+            image.accessibilityDescription = "Focus Todo"
+            return image
+        }
+
+        let fallback = NSImage(systemSymbolName: "timer", accessibilityDescription: "Focus Todo") ?? NSImage()
+        fallback.isTemplate = true
+        return fallback
     }
 
     private func configureStatusItem() {
