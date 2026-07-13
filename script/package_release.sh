@@ -59,6 +59,8 @@ cat >"$INFO_PLIST" <<PLIST
 </plist>
 PLIST
 
+codesign --force --deep --sign - "$APP_BUNDLE"
+
 rm -f "$ZIP_PATH"
 (
   cd "$DIST_DIR"

@@ -12,7 +12,21 @@ FocusTodo는 오늘 할 일, 뽀모도로 집중 세션, 메모, 집중 음악, 
 
 압축을 풀고 `FocusTodo.app`을 실행하면 메뉴바에 타이머 아이콘이 나타납니다.
 
-현재 배포 파일은 개발자 서명 및 Apple 공증을 거치지 않은 빌드입니다. macOS에서 실행을 막으면 Finder에서 앱을 우클릭한 뒤 `열기`를 선택해 실행하세요.
+현재 배포 파일은 Apple Developer ID 서명 및 공증을 거치지 않은 빌드입니다. macOS에서 실행을 막으면 Finder에서 앱을 우클릭한 뒤 `열기`를 선택해 실행하세요.
+
+만약 `'FocusTodo'은(는) 손상되었기 때문에 열 수 없습니다`라는 경고가 뜨면, 압축을 푼 위치에 맞춰 아래 명령을 실행한 뒤 다시 여세요.
+
+```bash
+xattr -dr com.apple.quarantine ~/Downloads/FocusTodo.app
+open ~/Downloads/FocusTodo.app
+```
+
+앱을 `/Applications`로 옮겼다면 아래처럼 실행합니다.
+
+```bash
+xattr -dr com.apple.quarantine /Applications/FocusTodo.app
+open /Applications/FocusTodo.app
+```
 
 ## 주요 기능
 
